@@ -176,23 +176,22 @@ async function getPayYantraToken() {
             signal: AbortSignal.timeout(5000) // Timeout after 5s
         });
 
+        const status = response.status;
+        const rawText = await response.text();
+        console.log(`[PayYantra Auth] Response status: ${status}, Body: ${rawText}`);
+
         if (!response.ok) {
-            const status = response.status;
-            const contentType = response.headers.get('content-type') || '';
-            let errText = '';
-            
-            if (contentType.includes('application/json')) {
-                const errJson = await response.json();
-                errText = JSON.stringify(errJson);
-                console.error(`[PayYantra Auth] Failed. Status: ${status}, JSON:`, errJson);
-            } else {
-                errText = await response.text();
-                console.error(`[PayYantra Auth] Failed. Status: ${status}, Text:`, errText.slice(0, 1000));
-            }
-            throw new Error(`Auth failed with status ${status}: ${errText.slice(0, 150)}`);
+            throw new Error(`Auth failed with status ${status}: ${rawText.slice(0, 150)}`);
         }
 
-        const data = await response.json();
+        let data;
+        try {
+            data = JSON.parse(rawText);
+        } catch (jsonErr) {
+            console.error(`[PayYantra Auth] Response was not valid JSON: "${rawText}"`);
+            throw new Error(`Auth response is not valid JSON: ${rawText.slice(0, 150)}`);
+        }
+
         const token = data.token || (data.data && data.data.token);
         if (!token) {
             console.error('[PayYantra Auth] Token missing in response:', data);
@@ -242,25 +241,24 @@ app.post('/api/payyantra/create-order', async (req, res) => {
             signal: AbortSignal.timeout(5000)
         });
 
+        const orderStatus = response.status;
+        const orderRawText = await response.text();
+        console.log(`[PayYantra Order] Response status: ${orderStatus}, Body: ${orderRawText}`);
+
         if (!response.ok) {
-            const status = response.status;
-            const contentType = response.headers.get('content-type') || '';
-            let errText = '';
-            
-            if (contentType.includes('application/json')) {
-                const errJson = await response.json();
-                errText = JSON.stringify(errJson);
-                console.error(`[PayYantra Order] Failed. Status: ${status}, JSON:`, errJson);
-            } else {
-                errText = await response.text();
-                console.error(`[PayYantra Order] Failed. Status: ${status}, Text:`, errText.slice(0, 1000));
-            }
-            return res.status(status).json({ 
-                error: `PayYantra Order creation failed: ${errText.slice(0, 200)}` 
+            return res.status(orderStatus).json({ 
+                error: `PayYantra Order creation failed: ${orderRawText.slice(0, 200)}` 
             });
         }
 
-        const data = await response.json();
+        let data;
+        try {
+            data = JSON.parse(orderRawText);
+        } catch (jsonErr) {
+            console.error(`[PayYantra Order] Response was not valid JSON: "${orderRawText}"`);
+            return res.status(500).json({ error: `PayYantra Order response not valid JSON: ${orderRawText.slice(0, 200)}` });
+        }
+
         const checkoutUrl = data.checkoutUrl || data.paymentUrl || data.url || 
                             (data.data && (data.data.checkoutUrl || data.data.paymentUrl || data.data.url));
         
@@ -315,13 +313,22 @@ app.get('/api/payyantra/status/:referenceId', async (req, res) => {
             signal: AbortSignal.timeout(5000)
         });
 
+        const statusRetStatus = response.status;
+        const statusRawText = await response.text();
+        console.log(`[PayYantra Status] Response status: ${statusRetStatus}, Body: ${statusRawText}`);
+
         if (!response.ok) {
-            const errText = await response.text();
-            console.error(`PayYantra status API returned status ${response.status}: ${errText}`);
-            return res.status(response.status).json({ error: `PayYantra status retrieval failed: ${errText.slice(0, 200)}` });
+            return res.status(statusRetStatus).json({ error: `PayYantra status retrieval failed: ${statusRawText.slice(0, 200)}` });
         }
 
-        const result = await response.json();
+        let result;
+        try {
+            result = JSON.parse(statusRawText);
+        } catch (jsonErr) {
+            console.error(`[PayYantra Status] Response was not valid JSON: "${statusRawText}"`);
+            return res.status(500).json({ error: `PayYantra status response not valid JSON: ${statusRawText.slice(0, 200)}` });
+        }
+
         const payyantraStatus = result.data?.status || result.status; // e.g. SUCCESS, PENDING, FAILED
         
         // Update local order status

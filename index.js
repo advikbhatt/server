@@ -3,18 +3,27 @@ import cors from 'cors';
 import puppeteer from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
-import dotenv from 'dotenv';
-
-// Load environment variables from local .env files if present
-dotenv.config();
-dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 
 const app = express();
 const port = 3001;
 
+
 // Allow large payloads for inline images and CSS
 app.use(express.json({ limit: '50mb' }));
-app.use(cors());
+
+// Custom CORS middleware to guarantee headers are set and preflight requests succeed
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    res.header('Access-Control-Allow-Origin', origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-client-id, x-client-secret');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
 
 app.post('/api/generate-pdf', async (req, res) => {
     const { html, css } = req.body;

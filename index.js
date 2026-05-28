@@ -123,8 +123,11 @@ app.post('/api/generate-pdf', async (req, res) => {
 
 // --- PayYantra Integration ---
 const PAYYANTRA_BASE_URL = process.env.PAYYANTRA_BASE_URL || 'https://payin-api.payyantra.com';
-const CLIENT_ID = process.env.PAYYANTRA_CLIENT_ID;
-const CLIENT_SECRET = process.env.PAYYANTRA_CLIENT_SECRET;
+const CLIENT_ID = process.env.PAYYANTRA_CLIENT_ID?.trim();
+const CLIENT_SECRET = process.env.PAYYANTRA_CLIENT_SECRET?.trim();
+
+console.log(`PAYYANTRA_CLIENT_ID: "${CLIENT_ID ? CLIENT_ID.substring(0, 10) + '...' : 'undefined'}" (length: ${CLIENT_ID ? CLIENT_ID.length : 0})`);
+console.log(`PAYYANTRA_CLIENT_SECRET: "${CLIENT_SECRET ? 'loaded' : 'undefined'}" (length: ${CLIENT_SECRET ? CLIENT_SECRET.length : 0})`);
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
     console.warn('WARNING: PAYYANTRA_CLIENT_ID or PAYYANTRA_CLIENT_SECRET environment variables are not set.');
@@ -157,28 +160,49 @@ function saveOrders(orders) {
 }
 
 // Get PayYantra Access Token
+// Get PayYantra Access Token
 async function getPayYantraToken() {
-    const response = await fetch(`${PAYYANTRA_BASE_URL}/api/auth/token`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-client-id': CLIENT_ID,
-            'x-client-secret': CLIENT_SECRET
-        },
-        signal: AbortSignal.timeout(5000) // Timeout after 5s
-    });
+    console.log(`[PayYantra Auth] Attempting token generation. URL: ${PAYYANTRA_BASE_URL}/api/auth/token`);
+    console.log(`[PayYantra Auth] Headers: x-client-id="${CLIENT_ID ? CLIENT_ID.substring(0, 10) + '...' : 'undefined'}" (len: ${CLIENT_ID ? CLIENT_ID.length : 0}), x-client-secret-len: ${CLIENT_SECRET ? CLIENT_SECRET.length : 0}`);
 
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Auth failed with status ${response.status}: ${errText.slice(0, 150)}`);
-    }
+    try {
+        const response = await fetch(`${PAYYANTRA_BASE_URL}/api/auth/token`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-client-id': CLIENT_ID || '',
+                'x-client-secret': CLIENT_SECRET || ''
+            },
+            signal: AbortSignal.timeout(5000) // Timeout after 5s
+        });
 
-    const data = await response.json();
-    const token = data.token || (data.data && data.data.token);
-    if (!token) {
-        throw new Error('No auth token returned in PayYantra response');
+        if (!response.ok) {
+            const status = response.status;
+            const contentType = response.headers.get('content-type') || '';
+            let errText = '';
+            
+            if (contentType.includes('application/json')) {
+                const errJson = await response.json();
+                errText = JSON.stringify(errJson);
+                console.error(`[PayYantra Auth] Failed. Status: ${status}, JSON:`, errJson);
+            } else {
+                errText = await response.text();
+                console.error(`[PayYantra Auth] Failed. Status: ${status}, Text:`, errText.slice(0, 1000));
+            }
+            throw new Error(`Auth failed with status ${status}: ${errText.slice(0, 150)}`);
+        }
+
+        const data = await response.json();
+        const token = data.token || (data.data && data.data.token);
+        if (!token) {
+            console.error('[PayYantra Auth] Token missing in response:', data);
+            throw new Error('No auth token returned in PayYantra response');
+        }
+        return token;
+    } catch (e) {
+        console.error('[PayYantra Auth Exception]:', e.message);
+        throw e;
     }
-    return token;
 }
 
 // Endpoint to create order
@@ -219,9 +243,19 @@ app.post('/api/payyantra/create-order', async (req, res) => {
         });
 
         if (!response.ok) {
-            const errText = await response.text();
-            console.error(`PayYantra Order API returned status ${response.status}: ${errText}`);
-            return res.status(response.status).json({ 
+            const status = response.status;
+            const contentType = response.headers.get('content-type') || '';
+            let errText = '';
+            
+            if (contentType.includes('application/json')) {
+                const errJson = await response.json();
+                errText = JSON.stringify(errJson);
+                console.error(`[PayYantra Order] Failed. Status: ${status}, JSON:`, errJson);
+            } else {
+                errText = await response.text();
+                console.error(`[PayYantra Order] Failed. Status: ${status}, Text:`, errText.slice(0, 1000));
+            }
+            return res.status(status).json({ 
                 error: `PayYantra Order creation failed: ${errText.slice(0, 200)}` 
             });
         }
